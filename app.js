@@ -26,6 +26,7 @@
   const themeToggleBtn = document.getElementById('themeToggleBtn');
   const filterToggleBtn = document.getElementById('filterToggleBtn');
   const shortcutsBtn = document.getElementById('shortcutsBtn');
+  const embedInteractiveBtn = document.getElementById('embedInteractiveBtn');
 
   // Controls Elements
   const playPauseBtn = document.getElementById('playPauseBtn');
@@ -145,6 +146,11 @@
   let controlsTimeout = null;
   let hudTimeout = null;
   let isRemainingTime = false;
+  let isEmbedPlaying = false;
+  let embedDuration = 0;
+  let embedCurrentTime = 0;
+  let embedProgressTimer = null;
+  let isIframeInteractive = false;
   let currentSubtitleRaw = null;
   let currentSubtitleUrl = null;
   let subtitleOffset = 0; // seconds
@@ -405,18 +411,26 @@
   // --- Auto-Hide Controls on Inactivity ---
   let isHoveringControls = false;
 
+  function isMediaPlaying() {
+    const item = playlist[currentIndex];
+    if (item && item.isEmbed) {
+      return isEmbedPlaying;
+    }
+    return !video.paused && !video.ended;
+  }
+
   function resetControlsTimeout() {
     playerOverlay.classList.remove('inactive');
     playerWrapper.classList.remove('hide-cursor');
 
     clearTimeout(controlsTimeout);
-    if (!video.paused && !isHoveringControls && !isAnyPopoverOpen()) {
+    if (isMediaPlaying() && !isHoveringControls && !isAnyPopoverOpen()) {
       controlsTimeout = setTimeout(() => {
-        if (!video.paused && !isHoveringControls && !isAnyPopoverOpen()) {
+        if (isMediaPlaying() && !isHoveringControls && !isAnyPopoverOpen()) {
           playerOverlay.classList.add('inactive');
           playerWrapper.classList.add('hide-cursor');
         }
-      }, 3000);
+      }, 2500);
     }
   }
 
@@ -433,19 +447,83 @@
     );
   }
 
+  // --- Embedded Player Helpers (YouTube / Vimeo / Twitch postMessage bridge) ---
+  function sendEmbedCommand(func, args = []) {
+    if (!embedFrame || !embedFrame.contentWindow) return;
+    try {
+      embedFrame.contentWindow.postMessage(JSON.stringify({
+        event: 'command',
+        func: func,
+        args: args
+      }), '*');
+    } catch (err) {
+      console.warn('Embed command error:', err);
+    }
+  }
+
+  function handleEmbedStateChange(state) {
+    if (state === 1) { // Playing
+      isEmbedPlaying = true;
+      playerWrapper.classList.add('playing');
+      playPauseBtn.innerHTML = ICONS.pause;
+      startEmbedProgressLoop();
+      resetControlsTimeout();
+    } else if (state === 2) { // Paused
+      isEmbedPlaying = false;
+      playerWrapper.classList.remove('playing');
+      playPauseBtn.innerHTML = ICONS.play;
+      stopEmbedProgressLoop();
+      playerOverlay.classList.remove('inactive');
+      playerWrapper.classList.remove('hide-cursor');
+    } else if (state === 0) { // Ended
+      isEmbedPlaying = false;
+      playerWrapper.classList.remove('playing');
+      playPauseBtn.innerHTML = ICONS.play;
+      stopEmbedProgressLoop();
+      playerOverlay.classList.remove('inactive');
+      playerWrapper.classList.remove('hide-cursor');
+      if (playlist.length > 1 && currentIndex < playlist.length - 1) {
+        playNextTrack();
+      }
+    }
+  }
+
+  function startEmbedProgressLoop() {
+    stopEmbedProgressLoop();
+    embedProgressTimer = setInterval(() => {
+      const item = playlist[currentIndex];
+      if (!item || !item.isEmbed || !isEmbedPlaying) {
+        stopEmbedProgressLoop();
+        return;
+      }
+      sendEmbedCommand('getCurrentTime');
+      sendEmbedCommand('getDuration');
+    }, 500);
+  }
+
+  function stopEmbedProgressLoop() {
+    if (embedProgressTimer) {
+      clearInterval(embedProgressTimer);
+      embedProgressTimer = null;
+    }
+  }
+
   // --- URL & Web Stream Parser ---
   function parseVideoUrl(rawUrl) {
     const url = (rawUrl || '').trim();
     if (!url) return null;
 
+    const origin = window.location.origin && window.location.origin !== 'null' ? window.location.origin : 'http://localhost:3000';
+
     // YouTube: standard watch?v=, youtu.be/, shorts/, embed/
+    // controls=0 completely strips YouTube's native navbar, red progress bar, play button, and suggestions!
     const ytMatch = url.match(/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?|shorts)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/i);
     if (ytMatch) {
       const videoId = ytMatch[1];
       return {
         type: 'youtube',
         isEmbed: true,
-        embedUrl: `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&rel=0`,
+        embedUrl: `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&controls=0&rel=0&modestbranding=1&enablejsapi=1&iv_load_policy=3&disablekb=1&fs=0&playsinline=1&origin=${encodeURIComponent(origin)}`,
         name: `YouTube: ${videoId}`,
         url
       };
@@ -458,7 +536,7 @@
       return {
         type: 'vimeo',
         isEmbed: true,
-        embedUrl: `https://player.vimeo.com/video/${videoId}?autoplay=1`,
+        embedUrl: `https://player.vimeo.com/video/${videoId}?autoplay=1&controls=0`,
         name: `Vimeo: ${videoId}`,
         url
       };
@@ -497,7 +575,7 @@
       return {
         type: 'dailymotion',
         isEmbed: true,
-        embedUrl: `https://www.dailymotion.com/embed/video/${videoId}?autoplay=1`,
+        embedUrl: `https://www.dailymotion.com/embed/video/${videoId}?autoplay=1&controls=0`,
         name: `Dailymotion: ${videoId}`,
         url
       };
@@ -659,15 +737,31 @@
       playerWrapper.classList.add('is-embed');
       playerWrapper.classList.add('playing');
 
+      embedCurrentTime = 0;
+      embedDuration = 0;
+      isEmbedPlaying = true;
+      playPauseBtn.innerHTML = ICONS.pause;
+      currentTimeEl.textContent = '00:00';
+      totalDurationEl.textContent = '00:00';
+      timelineProgress.style.width = '0%';
+      timelineThumb.style.left = '0%';
+      timelineBuffer.style.width = '0%';
+
       videoTitle.textContent = item.name;
       videoTitle.title = item.name;
-      videoMetaBadge.textContent = `${item.type.toUpperCase()} EMBED`;
+      videoMetaBadge.textContent = `${item.type.toUpperCase()} • AURA CONTROLS`;
       showHud(ICONS.play, `${item.type.toUpperCase()} Stream`);
+      resetControlsTimeout();
     } else {
       // --- Native HTML5 Video Mode ---
+      stopEmbedProgressLoop();
+      isEmbedPlaying = false;
       embedFrame.src = '';
       embedFrame.style.display = 'none';
       playerWrapper.classList.remove('is-embed');
+      playerWrapper.classList.remove('interactive-embed');
+      isIframeInteractive = false;
+      if (embedInteractiveBtn) embedInteractiveBtn.classList.remove('active');
 
       videoTitle.textContent = item.name;
       videoTitle.title = item.name;
@@ -871,7 +965,15 @@
     if (!item) return;
 
     if (item.isEmbed) {
-      showHud(ICONS.play, 'Control in video frame');
+      if (isEmbedPlaying) {
+        sendEmbedCommand('pauseVideo');
+        handleEmbedStateChange(2);
+        showHud(ICONS.pause, '');
+      } else {
+        sendEmbedCommand('playVideo');
+        handleEmbedStateChange(1);
+        showHud(ICONS.play, '');
+      }
       return;
     }
 
@@ -892,6 +994,24 @@
 
   // --- Seeking / Time Scrubbing ---
   function seekRelative(seconds) {
+    const item = playlist[currentIndex];
+    if (item && item.isEmbed) {
+      const baseTime = embedCurrentTime || 0;
+      const dur = embedDuration || 3600;
+      const targetTime = Math.max(0, Math.min(dur, baseTime + seconds));
+      embedCurrentTime = targetTime;
+      sendEmbedCommand('seekTo', [targetTime, true]);
+      currentTimeEl.textContent = formatTime(targetTime);
+      if (embedDuration > 0) {
+        const pct = (targetTime / embedDuration) * 100;
+        timelineProgress.style.width = `${pct}%`;
+        timelineThumb.style.left = `${pct}%`;
+      }
+      showHud(seconds > 0 ? ICONS.forward : ICONS.rewind, `${seconds > 0 ? '+' : ''}${seconds}s`);
+      resetControlsTimeout();
+      return;
+    }
+
     if (!video.src || !video.duration) return;
 
     if (pendingSeekTarget === null) {
@@ -938,14 +1058,24 @@
   }
 
   function handleTimelineSeek(e) {
-    if (!video.duration) return;
+    const item = playlist[currentIndex];
+    const duration = (item && item.isEmbed) ? embedDuration : video.duration;
+    if (!duration || isNaN(duration)) return;
+
     const rect = timelineContainer.getBoundingClientRect();
     const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    const targetTime = pos * video.duration;
+    const targetTime = pos * duration;
 
     timelineProgress.style.width = `${pos * 100}%`;
     timelineThumb.style.left = `${pos * 100}%`;
     currentTimeEl.textContent = formatTime(targetTime);
+
+    if (item && item.isEmbed) {
+      embedCurrentTime = targetTime;
+      sendEmbedCommand('seekTo', [targetTime, true]);
+      resetControlsTimeout();
+      return;
+    }
 
     const wasPlaying = !video.paused && !video.ended;
     if (typeof video.fastSeek === 'function') {
@@ -965,10 +1095,13 @@
   }
 
   function handleTimelineHover(e) {
-    if (!video.duration) return;
+    const item = playlist[currentIndex];
+    const duration = (item && item.isEmbed) ? embedDuration : video.duration;
+    if (!duration || isNaN(duration)) return;
+
     const rect = timelineContainer.getBoundingClientRect();
     const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    const targetTime = pos * video.duration;
+    const targetTime = pos * duration;
 
     timelineTooltip.textContent = formatTime(targetTime);
     timelineTooltip.style.left = `${pos * 100}%`;
@@ -1015,6 +1148,14 @@
     localStorage.setItem(STORAGE_VOLUME, clamped);
     updateVolumeUI();
     showHud(ICONS.volumeUp, `${Math.round(clamped * 100)}%`);
+
+    const item = playlist[currentIndex];
+    if (item && item.isEmbed) {
+      sendEmbedCommand('setVolume', [Math.round(clamped * 100)]);
+      if (clamped > 0) {
+        sendEmbedCommand('unMute', []);
+      }
+    }
   }
 
   function toggleMute() {
@@ -1022,6 +1163,16 @@
     localStorage.setItem(STORAGE_MUTED, video.muted);
     updateVolumeUI();
     showHud(video.muted ? ICONS.volumeMute : ICONS.volumeUp, video.muted ? 'Muted' : `${Math.round(video.volume * 100)}%`);
+
+    const item = playlist[currentIndex];
+    if (item && item.isEmbed) {
+      if (video.muted) {
+        sendEmbedCommand('mute', []);
+      } else {
+        sendEmbedCommand('unMute', []);
+        sendEmbedCommand('setVolume', [Math.round(video.volume * 100)]);
+      }
+    }
   }
 
   function updateVolumeUI() {
@@ -1082,6 +1233,11 @@
       });
     }
 
+    const item = playlist[currentIndex];
+    if (item && item.isEmbed) {
+      sendEmbedCommand('setPlaybackRate', [speed]);
+    }
+
     if (flashHud) {
       showHud(ICONS.speed, `${formatted} Speed`);
     }
@@ -1122,6 +1278,12 @@
 
   // --- Frame Snapshot Capture ---
   function takeSnapshot() {
+    const item = playlist[currentIndex];
+    if (item && item.isEmbed) {
+      showHud(ICONS.snapshot, 'Snapshot not supported for web embeds');
+      return;
+    }
+
     if (!video.src || !video.videoWidth) return;
 
     snapshotCanvas.width = video.videoWidth;
@@ -1595,7 +1757,7 @@
           e.target.closest('.popover-menu') ||
           e.target.closest('.modal-dialog') ||
           e.target.closest('.drop-zone') ||
-          playerWrapper.classList.contains('is-embed')) {
+          playerWrapper.classList.contains('interactive-embed')) {
         return;
       }
       togglePlay();
@@ -1610,7 +1772,7 @@
           e.target.closest('.popover-menu') ||
           e.target.closest('.modal-dialog') ||
           e.target.closest('.drop-zone') ||
-          playerWrapper.classList.contains('is-embed')) {
+          playerWrapper.classList.contains('interactive-embed')) {
         return;
       }
       toggleFullscreen();
@@ -2106,6 +2268,14 @@
     openFilesBtn.addEventListener('click', () => videoFileInput.click());
     returnToDropBtn.addEventListener('click', () => {
       dropZone.classList.remove('hidden');
+      if (embedFrame) {
+        embedFrame.src = '';
+        embedFrame.style.display = 'none';
+      }
+      playerWrapper.classList.remove('is-embed');
+      isEmbedPlaying = false;
+      stopEmbedProgressLoop();
+      video.pause();
     });
 
     videoFileInput.addEventListener('change', (e) => {
@@ -2154,12 +2324,100 @@
     // Global Keyboard Shortcuts
     document.addEventListener('keydown', handleKeyDown);
 
-    // Fullscreen change detection
+    // Fullscreen change detection - ensure controls auto-hide after inactivity in fullscreen
     document.addEventListener('fullscreenchange', () => {
       if (document.fullscreenElement) {
         playerWrapper.classList.add('is-fullscreen');
       } else {
         playerWrapper.classList.remove('is-fullscreen');
+      }
+      resetControlsTimeout();
+    });
+
+    if (embedInteractiveBtn) {
+      embedInteractiveBtn.addEventListener('click', () => {
+        isIframeInteractive = !isIframeInteractive;
+        playerWrapper.classList.toggle('interactive-embed', isIframeInteractive);
+        embedInteractiveBtn.classList.toggle('active', isIframeInteractive);
+        showHud(
+          ICONS.play,
+          isIframeInteractive ? 'Direct Frame Click ON' : 'Aura Player Controls Active'
+        );
+      });
+    }
+
+    // Embed Frame Load & YouTube API Handshake
+    embedFrame.addEventListener('load', () => {
+      const item = playlist[currentIndex];
+      if (!item || !item.isEmbed) return;
+
+      isEmbedPlaying = true;
+      playerWrapper.classList.add('playing');
+      playPauseBtn.innerHTML = ICONS.pause;
+      resetControlsTimeout();
+
+      setTimeout(() => {
+        try {
+          embedFrame.contentWindow.postMessage(JSON.stringify({
+            event: 'listening',
+            id: 1,
+            channel: 'widget'
+          }), '*');
+          
+          sendEmbedCommand('setVolume', [Math.round((video.volume !== undefined ? video.volume : 1) * 100)]);
+          sendEmbedCommand('setPlaybackRate', [video.playbackRate || 1.0]);
+          startEmbedProgressLoop();
+        } catch (err) {
+          console.warn('Embed handshake error:', err);
+        }
+      }, 400);
+    });
+
+    // YouTube / Embed postMessage event listener
+    window.addEventListener('message', (e) => {
+      let data = e.data;
+      if (typeof data === 'string') {
+        try {
+          data = JSON.parse(data);
+        } catch {
+          return;
+        }
+      }
+      if (!data || typeof data !== 'object') return;
+
+      if (data.event === 'infoDelivery' && data.info) {
+        const info = data.info;
+        if (typeof info.duration === 'number' && info.duration > 0) {
+          embedDuration = info.duration;
+          totalDurationEl.textContent = formatTime(embedDuration);
+          videoMetaBadge.textContent = `${formatTime(embedDuration)} • YOUTUBE STREAM`;
+        }
+        if (typeof info.currentTime === 'number') {
+          embedCurrentTime = info.currentTime;
+          currentTimeEl.textContent = formatTime(embedCurrentTime);
+          if (embedDuration > 0 && !timelineContainer.classList.contains('dragging')) {
+            const pct = (embedCurrentTime / embedDuration) * 100;
+            timelineProgress.style.width = `${pct}%`;
+            timelineThumb.style.left = `${pct}%`;
+          }
+        }
+        if (typeof info.videoLoadedFraction === 'number') {
+          timelineBuffer.style.width = `${info.videoLoadedFraction * 100}%`;
+        }
+        if (typeof info.playerState === 'number') {
+          handleEmbedStateChange(info.playerState);
+        }
+        if (info.videoData && info.videoData.title) {
+          videoTitle.textContent = info.videoData.title;
+          videoTitle.title = info.videoData.title;
+        }
+      } else if (data.event === 'onStateChange') {
+        handleEmbedStateChange(data.info);
+      } else if (data.event === 'initialDelivery' && data.info) {
+        if (typeof data.info.duration === 'number') {
+          embedDuration = data.info.duration;
+          totalDurationEl.textContent = formatTime(embedDuration);
+        }
       }
     });
   }

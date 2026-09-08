@@ -206,8 +206,9 @@ html, body {
 }
 
 /* Hide cursor when controls are inactive */
-.player-wrapper.hide-cursor {
-  cursor: none;
+.player-wrapper.hide-cursor,
+.player-wrapper.hide-cursor * {
+  cursor: none !important;
 }
 
 /* Dynamic Ambient Back-Glow (Aura Effect) */
@@ -683,10 +684,25 @@ video::cue {
 }
 
 .player-overlay.inactive {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+.player-overlay.inactive * {
+  pointer-events: none !important;
+}
+
+.player-overlay.inactive .top-bar {
+  transform: translateY(-16px);
   opacity: 0;
 }
 
-/* Ensure all interactive controls inside the overlay are clickable */
+.player-overlay.inactive .bottom-bar {
+  transform: translateY(18px);
+  opacity: 0;
+}
+
+/* Ensure all interactive controls inside the overlay are clickable when active */
 .top-bar,
 .bottom-bar,
 .playlist-drawer,
@@ -1749,31 +1765,34 @@ kbd {
   display: none !important;
 }
 
-/* Lower navbar when playing an embedded video (YouTube / Vimeo / etc.) */
-.player-wrapper.is-embed .bottom-bar {
-  display: flex !important;
-  flex-direction: row;
-  justify-content: flex-end;
-  align-items: center;
-  background: var(--bg-glass);
-  backdrop-filter: blur(24px) saturate(180%);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
-  width: auto;
-  margin-left: auto;
-  border-radius: var(--radius-full);
-  padding: 6px 14px;
-  box-shadow: 0 16px 36px -8px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.05);
+/* Ensure mouse events, moves, and clicks bubble to playerWrapper for auto-hide & controls */
+.player-wrapper.is-embed .embed-frame {
+  pointer-events: none;
 }
 
-.player-wrapper.is-embed .timeline-container,
-.player-wrapper.is-embed .controls-left {
+/* Optional direct frame interaction mode */
+.player-wrapper.is-embed.interactive-embed .embed-frame {
+  pointer-events: auto;
+}
+
+/* Hide native-only buttons that do not apply to third-party iframes */
+.player-wrapper.is-embed #snapshotBtn,
+.player-wrapper.is-embed #pipBtn,
+.player-wrapper.is-embed #aspectRatioBtn {
   display: none !important;
 }
 
-.player-wrapper.is-embed .controls-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+/* Direct frame interaction button in top bar (visible only when is-embed) */
+#embedInteractiveBtn {
+  display: none;
+}
+.player-wrapper.is-embed #embedInteractiveBtn {
+  display: flex !important;
+}
+#embedInteractiveBtn.active {
+  background: var(--accent-primary) !important;
+  color: #fff !important;
+  box-shadow: 0 0 12px var(--accent-glow) !important;
 }
 
 .download-control-btn {
