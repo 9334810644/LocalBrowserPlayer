@@ -1,0 +1,16 @@
+{
+  "name": "AuraPlayer - Offline Video Player",
+  "short_name": "AuraPlayer",
+  "description": "Modern cinematic offline video player for your local media files",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#07090e",
+  "theme_color": "#090b10",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='128' fill='%23090b10'/><polygon points='190,140 380,256 190,372' fill='%236366f1'/></svg>",
+      "sizes": "512x512",
+      "type": "image/svg+xml"
+    }
+  ]
+}

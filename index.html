@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AuraPlayer | Modern Offline Video Player</title>
+  <meta name="description" content="A sleek, high-performance, fully offline video player for your browser with playlist queue, custom controls, subtitles, and video filters.">
+  <meta name="theme-color" content="#090b10">
+  <link rel="manifest" href="manifest.json">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%236366f1'><polygon points='5 3 19 12 5 21 5 3'/></svg>">
+  <script>
+    (function() {
+      try {
+        const savedTheme = localStorage.getItem('auraplayer_theme') || 'aura-midnight';
+        document.documentElement.setAttribute('data-theme', savedTheme);
+      } catch (e) {}
+    })();
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.8/dist/hls.min.js" defer></script>
+</head>
+<body>
+  <!-- Main Application Shell -->
+  <div class="app-container" id="appContainer">
+    
+    <!-- Video Player Viewport -->
+    <main class="player-wrapper" id="playerWrapper" tabindex="0">
+      
+      <!-- Dynamic Ambient Back-Glow (Aura Lighting Effect) -->
+      <canvas id="ambientGlow" class="ambient-glow-canvas" aria-hidden="true"></canvas>
+
+      <!-- Native Video Element -->
+      <video id="videoElement" playsinline preload="auto">
+        <track id="subtitleTrack" kind="subtitles" srclang="en" label="Subtitles" default>
+        Your browser does not support HTML5 video playback.
+      </video>
+
+      <!-- Embedded Player Frame (For YouTube / Vimeo embeds) -->
+      <iframe id="embedFrame" class="embed-frame" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen style="display: none;"></iframe>
+
+      <!-- Center Feedback HUD (Flash icon on play/pause/seek/vol) -->
+      <div class="feedback-hud" id="feedbackHud" aria-hidden="true">
+        <div class="hud-icon" id="hudIcon"></div>
+        <div class="hud-text" id="hudText"></div>
+      </div>
+
+      <!-- Center Buffering Spinner -->
+      <div class="buffering-spinner" id="bufferingSpinner" aria-hidden="true">
+        <div class="spinner-ring"></div>
+      </div>
+
+      <!-- Empty State / Drag & Drop Zone -->
+      <section class="drop-zone" id="dropZone" aria-label="Drop files to play">
+        <div class="drop-zone-content">
+          <div class="glow-orb"></div>
+          <div class="drop-icon-wrapper">
+            <svg class="drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+            </svg>
+          </div>
+          <h1 class="drop-title">Drop your videos here</h1>
+          <p class="drop-subtitle">Plays directly from your device. 100% offline & private.</p>
+          <div class="drop-actions">
+            <button class="btn btn-primary" id="openFilesBtn" type="button">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-icon">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+              </svg>
+              Choose Video Files
+            </button>
+            <button class="btn btn-secondary" id="openUrlBtn" type="button" title="Paste any video URL or web stream">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-icon">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" />
+              </svg>
+              Paste Video Link
+            </button>
+          </div>
+          <div class="supported-badges">
+            <span>MP4</span>
+            <span>MKV</span>
+            <span>WEBM</span>
+            <span>HLS (.m3u8)</span>
+            <span>MOV</span>
+            <span>AVI</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Player Controls Overlay (Auto-hides on inactivity) -->
+      <div class="player-overlay" id="playerOverlay">
+        
+        <!-- Top Bar -->
+        <header class="top-bar" id="topBar">
+          <div class="video-info">
+            <button class="icon-btn" id="returnToDropBtn" title="Back to Open Files" aria-label="Open new files">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
+              </svg>
+            </button>
+            <div class="title-container">
+              <div class="title-row">
+                <h2 class="video-title" id="videoTitle">No video selected</h2>
+                <div class="playing-equalizer" id="playingEqualizer" aria-hidden="true" title="Playing">
+                  <span></span><span></span><span></span><span></span>
+                </div>
+              </div>
+              <span class="video-meta-badge" id="videoMetaBadge">00:00 • 0p</span>
+            </div>
+          </div>
+
+          <div class="top-actions">
+            <!-- Ambient Glow Toggle Button -->
+            <button class="icon-btn" id="ambientToggleBtn" title="Ambient Lighting (A)" aria-label="Toggle ambient glow">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="4" />
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+              </svg>
+            </button>
+
+            <!-- Theme Selector Button -->
+            <button class="icon-btn theme-toggle-btn" id="themeToggleBtn" title="Select Theme (T)" aria-label="Choose color theme">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M4.098 19.902a3.75 3.75 0 005.304 0l6.401-6.402M6.75 21A3.75 3.75 0 013 17.25V4.125C3 3.504 3.504 3 4.125 3h5.25c.621 0 1.125.504 1.125 1.125v4.072M6.75 21a3.75 3.75 0 003.75-3.75V8.197M6.75 21h13.125c.621 0 1.125-.504 1.125-1.125v-5.25c0-.621-.504-1.125-1.125-1.125h-4.072M10.5 8.197l2.88-2.88a1.875 1.875 0 012.652 0l2.879 2.879a1.875 1.875 0 010 2.652l-2.88 2.88" />
+              </svg>
+            </button>
+
+            <!-- Play from URL Button -->
+            <button class="icon-btn" id="openUrlTopBtn" title="Play from URL / Stream (U)" aria-label="Open URL or Stream">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" />
+              </svg>
+            </button>
+
+            <!-- Download Active Video Button in Top Bar -->
+            <button class="icon-btn" id="downloadTopBtn" title="Download Video (D)" aria-label="Download video">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+              </svg>
+            </button>
+
+            <!-- Playlist Toggle Button -->
+            <button class="icon-btn" id="playlistToggleBtn" title="Playlist Queue (P)" aria-label="Toggle playlist">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25H12" />
+              </svg>
+              <span class="playlist-badge" id="playlistCountBadge">0</span>
+            </button>
+
+            <!-- Video Filters / Enhancements Button -->
+            <button class="icon-btn" id="filterToggleBtn" title="Video Adjustments" aria-label="Adjust brightness and contrast">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6a7.5 7.5 0 107.5 7.5h-7.5V6z" />
+                <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 10.5H21A7.5 7.5 0 0013.5 3v7.5z" />
+              </svg>
+            </button>
+
+            <!-- Shortcuts Dialog Button -->
+            <button class="icon-btn" id="shortcutsBtn" title="Keyboard Shortcuts (?)" aria-label="Keyboard shortcuts">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z" />
+              </svg>
+            </button>
+          </div>
+        </header>
+
+        <!-- Bottom Controls Bar -->
+        <div class="bottom-bar" id="bottomBar">
+          
+          <!-- Scrubber / Timeline Container -->
+          <div class="timeline-container" id="timelineContainer">
+            <div class="timeline-tooltip" id="timelineTooltip">00:00</div>
+            <div class="timeline-track">
+              <div class="timeline-buffer" id="timelineBuffer"></div>
+              <div class="timeline-progress" id="timelineProgress"></div>
+              <div class="timeline-thumb" id="timelineThumb"></div>
+            </div>
+          </div>
+
+          <!-- Controls Row -->
+          <div class="controls-row">
+            
+            <!-- Left Group: Playback & Volume -->
+            <div class="controls-left">
+              <!-- Prev Track -->
+              <button class="control-btn" id="prevTrackBtn" title="Previous Video (Shift+N)" aria-label="Previous track">
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/>
+                </svg>
+              </button>
+
+              <!-- Play / Pause -->
+              <button class="control-btn play-btn" id="playPauseBtn" title="Play/Pause (Space)" aria-label="Play or pause">
+                <svg class="icon-play" viewBox="0 0 24 24" fill="currentColor">
+                  <polygon points="6 4 20 12 6 20 6 4" />
+                </svg>
+                <svg class="icon-pause" viewBox="0 0 24 24" fill="currentColor">
+                  <rect x="6" y="4" width="4" height="16" rx="1" />
+                  <rect x="14" y="4" width="4" height="16" rx="1" />
+                </svg>
+              </button>
+
+              <!-- Next Track -->
+              <button class="control-btn" id="nextTrackBtn" title="Next Video (N)" aria-label="Next track">
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/>
+                </svg>
+              </button>
+
+              <!-- Skip -10s -->
+              <button class="control-btn" id="rewindBtn" title="Rewind 10s (J or Left Arrow)" aria-label="Rewind 10 seconds">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M12.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0019 16V8a1 1 0 00-1.6-.8l-5.333 4zM4.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0011 16V8a1 1 0 00-1.6-.8l-5.334 4z" />
+                </svg>
+              </button>
+
+              <!-- Skip +10s -->
+              <button class="control-btn" id="forwardBtn" title="Forward 10s (L or Right Arrow)" aria-label="Forward 10 seconds">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M11.934 12.8a1 1 0 000-1.6L6.6 7.2A1 1 0 005 8v8a1 1 0 001.6.8l5.334-4zM19.934 12.8a1 1 0 000-1.6l-5.334-4A1 1 0 0013 8v8a1 1 0 001.6.8l5.334-4z" />
+                </svg>
+              </button>
+
+              <!-- Volume Container -->
+              <div class="volume-container" id="volumeContainer">
+                <button class="control-btn" id="muteBtn" title="Mute/Unmute (M)" aria-label="Mute or unmute">
+                  <svg class="icon-vol-high" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77zm-2.5-1.23L6 6H2v12h4l5.5 4V2zm4.5 10c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/>
+                  </svg>
+                  <svg class="icon-vol-low" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M7 9v6h4l5 5V4l-5 5H7z"/>
+                  </svg>
+                  <svg class="icon-vol-mute" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>
+                  </svg>
+                </button>
+                <div class="volume-slider-wrapper">
+                  <input type="range" class="volume-slider" id="volumeSlider" min="0" max="1" step="0.02" value="1" aria-label="Volume slider">
+                  <span class="volume-percent" id="volumePercent">100%</span>
+                </div>
+              </div>
+
+              <!-- Time Display -->
+              <div class="time-display" id="timeDisplay" title="Click to toggle remaining time">
+                <span id="currentTime">00:00</span>
+                <span class="time-divider">/</span>
+                <span id="totalDuration">00:00</span>
+              </div>
+            </div>
+
+            <!-- Right Group: Subtitles, Speed, Filters, Fullscreen -->
+            <div class="controls-right">
+              
+              <!-- Subtitle Button -->
+              <button class="control-btn" id="subtitleBtn" title="Subtitles / Captions (C)" aria-label="Subtitles">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="5" width="18" height="14" rx="2" />
+                  <path d="M7 15h3M7 11h4M14 15h3M14 11h3" />
+                </svg>
+              </button>
+
+              <!-- Playback Speed Menu Button -->
+              <div class="dropdown-wrapper">
+                <button class="control-btn speed-btn" id="speedBtn" title="Playback Speed ([ or ])" aria-label="Playback speed">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-icon-sm">
+                    <circle cx="12" cy="12" r="9" />
+                    <polyline points="12 7 12 12 15 15" />
+                  </svg>
+                  <span id="speedValue">1.0x</span>
+                </button>
+                <div class="popover-menu speed-menu" id="speedMenu">
+                  <div class="popover-header">
+                    <span>Playback Speed</span>
+                    <button class="text-btn" id="resetSpeedBtn" type="button">Reset</button>
+                  </div>
+                  
+                  <!-- Speed Slider with live value -->
+                  <div class="speed-slider-section">
+                    <div class="slider-header">
+                      <span>Custom Speed</span>
+                      <span class="speed-indicator" id="speedSliderValue">1.00x</span>
+                    </div>
+                    <input type="range" id="speedSlider" min="0.25" max="2.0" step="0.05" value="1.0">
+                  </div>
+
+                  <!-- Speed Presets Grid -->
+                  <div class="speed-presets-grid">
+                    <button class="preset-chip" data-speed="0.25" type="button">0.25x</button>
+                    <button class="preset-chip" data-speed="0.5" type="button">0.5x</button>
+                    <button class="preset-chip" data-speed="0.75" type="button">0.75x</button>
+                    <button class="preset-chip active" data-speed="1.0" type="button">1.00x</button>
+                    <button class="preset-chip" data-speed="1.25" type="button">1.25x</button>
+                    <button class="preset-chip" data-speed="1.5" type="button">1.50x</button>
+                    <button class="preset-chip" data-speed="1.75" type="button">1.75x</button>
+                    <button class="preset-chip" data-speed="2.0" type="button">2.00x</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Download Video Button (Prominent in Lower Navbar) -->
+              <button class="control-btn download-control-btn" id="downloadBtn" title="Download Video (D)" aria-label="Download video">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                </svg>
+              </button>
+
+              <!-- Aspect Ratio Toggle -->
+              <button class="control-btn" id="aspectRatioBtn" title="Cycle Aspect Ratio (Fit / Fill / 16:9)" aria-label="Aspect Ratio">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="2" y="5" width="20" height="14" rx="2" />
+                  <path d="M6 9h3v2M18 15h-3v-2" />
+                </svg>
+              </button>
+
+              <!-- Snapshot / Screenshot -->
+              <button class="control-btn" id="snapshotBtn" title="Capture Frame Snapshot (S)" aria-label="Take screenshot">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" />
+                  <circle cx="12" cy="13.5" r="3.75" />
+                </svg>
+              </button>
+
+              <!-- Picture in Picture -->
+              <button class="control-btn" id="pipBtn" title="Picture in Picture (P)" aria-label="Picture in Picture">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="4" width="18" height="16" rx="2" />
+                  <rect x="12" y="11" width="7" height="6" rx="1" fill="currentColor" opacity="0.3"/>
+                  <rect x="12" y="11" width="7" height="6" rx="1" stroke="currentColor" />
+                </svg>
+              </button>
+
+              <!-- Fullscreen -->
+              <button class="control-btn" id="fullscreenBtn" title="Fullscreen (F)" aria-label="Toggle fullscreen">
+                <svg class="icon-fs-enter" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m12 0h-4.5m4.5 0v4.5m0 12v-4.5m0 4.5h-4.5m-12 0h4.5m-4.5 0v-4.5" />
+                </svg>
+                <svg class="icon-fs-exit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M9 9V4.5M9 9H4.5M15 9h4.5M15 9V4.5M15 15v4.5M15 15h4.5M9 15H4.5M9 15v4.5" />
+                </svg>
+              </button>
+            </div>
+
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Playlist Drawer Panel (Slide-out from Right) -->
+      <aside class="playlist-drawer" id="playlistDrawer" aria-label="Playlist Queue">
+        <div class="drawer-header">
+          <div class="drawer-title-group">
+            <h3>Queue</h3>
+            <span class="badge" id="queueTotalBadge">0 videos</span>
+          </div>
+          <div class="drawer-actions">
+            <button class="icon-btn-sm" id="addMoreVideosBtn" title="Add more video files">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+              </svg>
+            </button>
+            <button class="icon-btn-sm" id="addUrlToDrawerBtn" title="Add video link / stream from URL">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" />
+              </svg>
+            </button>
+            <button class="icon-btn-sm" id="clearPlaylistBtn" title="Clear all">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+              </svg>
+            </button>
+            <button class="icon-btn-sm" id="closeDrawerBtn" title="Close Queue">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <ul class="playlist-list" id="playlistList">
+          <!-- Dynamically populated playlist items -->
+        </ul>
+      </aside>
+
+      <!-- Video Enhancements / Filters Popover -->
+      <div class="popover-card filter-popover" id="filterPopover">
+        <div class="popover-header">
+          <span>Video Visual Adjustments</span>
+          <button class="text-btn" id="resetFiltersBtn">Reset</button>
+        </div>
+        <div class="slider-group">
+          <div class="slider-header">
+            <label for="brightnessSlider">Brightness</label>
+            <span id="brightnessVal">100%</span>
+          </div>
+          <input type="range" id="brightnessSlider" min="50" max="175" value="100">
+        </div>
+        <div class="slider-group">
+          <div class="slider-header">
+            <label for="contrastSlider">Contrast</label>
+            <span id="contrastVal">100%</span>
+          </div>
+          <input type="range" id="contrastSlider" min="50" max="175" value="100">
+        </div>
+        <div class="slider-group">
+          <div class="slider-header">
+            <label for="saturationSlider">Saturation</label>
+            <span id="saturationVal">100%</span>
+          </div>
+          <input type="range" id="saturationSlider" min="0" max="200" value="100">
+        </div>
+      </div>
+
+      <!-- Color Themes Popover -->
+      <div class="popover-card theme-popover" id="themePopover" role="dialog" aria-label="Theme Selection">
+        <div class="popover-header">
+          <div class="popover-title-row">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="popover-header-icon">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M4.098 19.902a3.75 3.75 0 005.304 0l6.401-6.402M6.75 21A3.75 3.75 0 013 17.25V4.125C3 3.504 3.504 3 4.125 3h5.25c.621 0 1.125.504 1.125 1.125v4.072M6.75 21a3.75 3.75 0 003.75-3.75V8.197M6.75 21h13.125c.621 0 1.125-.504 1.125-1.125v-5.25c0-.621-.504-1.125-1.125-1.125h-4.072M10.5 8.197l2.88-2.88a1.875 1.875 0 012.652 0l2.879 2.879a1.875 1.875 0 010 2.652l-2.88 2.88" />
+            </svg>
+            <span>Color Theme</span>
+          </div>
+          <span class="theme-shortcut-hint">Press <kbd>T</kbd> to cycle</span>
+        </div>
+        <div class="theme-options-grid" id="themeOptionsGrid">
+          <!-- Populated dynamically or styled statically -->
+        </div>
+      </div>
+
+      <!-- Subtitle Options Popover -->
+      <div class="popover-card subtitle-popover" id="subtitlePopover">
+        <div class="popover-header">
+          <span>Subtitles & Captions</span>
+          <button class="icon-btn-sm" id="closeSubtitlePopoverBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <div class="subtitle-content">
+          <div class="toggle-row">
+            <span>Show Subtitles</span>
+            <input type="checkbox" id="subtitleToggleCheckbox" checked>
+          </div>
+          <div class="subtitle-file-info" id="subtitleFileInfo">
+            No external subtitle loaded
+          </div>
+          <button class="btn btn-secondary btn-full" id="loadSubtitleFileBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-icon">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m3.75 9v6m3-3H9m1.5-12H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+            </svg>
+            Load .SRT or .VTT File
+          </button>
+          
+          <div class="slider-group">
+            <div class="slider-header">
+              <label>Subtitle Sync Offset</label>
+              <span id="subtitleOffsetVal">0.0s</span>
+            </div>
+            <div class="offset-buttons">
+              <button class="btn-chip" id="offsetMinusBtn">-0.5s</button>
+              <button class="btn-chip" id="offsetResetBtn">Reset</button>
+              <button class="btn-chip" id="offsetPlusBtn">+0.5s</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </main>
+
+    <!-- Open from URL / Stream Modal Dialog -->
+    <dialog class="modal-dialog" id="urlDialog">
+      <div class="modal-card url-modal-card">
+        <div class="modal-header">
+          <h3>Play from URL or Web Stream</h3>
+          <button class="icon-btn-sm" id="closeUrlModal">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <p class="modal-desc">Enter any direct video link (MP4, WEBM), live HLS stream (.m3u8), or web video link (YouTube, Vimeo).</p>
+        
+        <div class="url-input-container">
+          <input type="url" id="videoUrlInput" class="url-text-input" placeholder="https://example.com/video.mp4 or YouTube link..." autocomplete="off">
+          <button class="btn btn-secondary btn-paste" id="pasteClipboardBtn" type="button" title="Paste from clipboard">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-icon">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
+            </svg>
+            Paste
+          </button>
+        </div>
+
+        <!-- Preset / Quick Samples -->
+        <div class="quick-samples">
+          <span class="samples-label">Quick Test Links:</span>
+          <button class="sample-chip" data-url="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4">Big Buck Bunny (MP4)</button>
+          <button class="sample-chip" data-url="https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8">HLS Stream (.m3u8)</button>
+          <button class="sample-chip" data-url="https://www.youtube.com/watch?v=aqz-KE-bpKQ">YouTube (Big Buck Bunny)</button>
+        </div>
+
+        <div class="url-modal-actions">
+          <button class="btn btn-secondary" id="addUrlToQueueBtn" type="button">Add to Queue</button>
+          <button class="btn btn-primary" id="playUrlNowBtn" type="button">Play Now</button>
+        </div>
+      </div>
+    </dialog>
+
+    <!-- Video Download Options Dialog -->
+    <dialog class="modal-dialog" id="downloadDialog">
+      <div class="modal-card download-modal-card">
+        <div class="modal-header">
+          <div class="modal-title-with-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="modal-title-icon">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+            </svg>
+            <h3>Download Video</h3>
+          </div>
+          <button class="icon-btn-sm" id="closeDownloadModal" type="button" aria-label="Close download modal">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div class="download-video-info">
+          <span class="download-badge" id="downloadPlatformBadge">YOUTUBE</span>
+          <h4 class="download-video-title" id="downloadVideoTitle">Video Title</h4>
+          <p class="download-video-url" id="downloadVideoUrl">https://...</p>
+        </div>
+
+        <div class="download-options-list">
+          <button class="download-option-btn primary" id="btnDownloadConverter" type="button">
+            <div class="option-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+              </svg>
+            </div>
+            <div class="option-content">
+              <span class="option-title">Download Video (MP4 / Audio)</span>
+              <span class="option-desc">Fast 1-click download portal (1080p, 720p, MP3)</span>
+            </div>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="option-arrow">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+            </svg>
+          </button>
+
+          <button class="download-option-btn" id="btnDownloadCopyLink" type="button">
+            <div class="option-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
+              </svg>
+            </div>
+            <div class="option-content">
+              <span class="option-title">Copy Video URL</span>
+              <span class="option-desc">Copy source stream link to clipboard</span>
+            </div>
+          </button>
+
+          <button class="download-option-btn" id="btnDownloadOpenSource" type="button">
+            <div class="option-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+              </svg>
+            </div>
+            <div class="option-content">
+              <span class="option-title">Open Original Source</span>
+              <span class="option-desc">View on provider platform</span>
+            </div>
+          </button>
+        </div>
+
+        <div class="download-notice">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="notice-icon">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="16" x2="12" y2="12" />
+            <line x1="12" y1="8" x2="12.01" y2="8" />
+          </svg>
+          <span>Streaming platforms (YouTube, Vimeo, etc.) protect videos with segmented DASH streams and cross-origin security rules. Clicking <strong>Download Video (MP4)</strong> above loads your video into a high-speed extractor to give you full MP4 files in 1 click.</span>
+        </div>
+      </div>
+    </dialog>
+
+    <!-- Keyboard Shortcuts Modal Dialog -->
+    <dialog class="modal-dialog" id="shortcutsDialog">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3>Keyboard Shortcuts</h3>
+          <button class="icon-btn-sm" id="closeShortcutsModal">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <div class="shortcuts-grid">
+          <div class="shortcut-item"><kbd>Space</kbd> or <kbd>K</kbd> <span>Play / Pause</span></div>
+          <div class="shortcut-item"><kbd>F</kbd> <span>Toggle Fullscreen</span></div>
+          <div class="shortcut-item"><kbd>M</kbd> <span>Mute / Unmute</span></div>
+          <div class="shortcut-item"><kbd>→</kbd> / <kbd>←</kbd> <span>Seek 5 seconds</span></div>
+          <div class="shortcut-item"><kbd>L</kbd> / <kbd>J</kbd> <span>Seek 10 seconds</span></div>
+          <div class="shortcut-item"><kbd>↑</kbd> / <kbd>↓</kbd> <span>Volume + / - 5%</span></div>
+          <div class="shortcut-item"><kbd>]</kbd> / <kbd>[</kbd> <span>Speed + / - 0.25x</span></div>
+          <div class="shortcut-item"><kbd>S</kbd> <span>Snapshot Frame (PNG)</span></div>
+          <div class="shortcut-item"><kbd>D</kbd> <span>Download Video</span></div>
+          <div class="shortcut-item"><kbd>P</kbd> <span>Picture-in-Picture</span></div>
+          <div class="shortcut-item"><kbd>C</kbd> <span>Toggle Subtitles</span></div>
+          <div class="shortcut-item"><kbd>T</kbd> <span>Cycle Color Theme</span></div>
+          <div class="shortcut-item"><kbd>A</kbd> <span>Toggle Ambient Aura</span></div>
+          <div class="shortcut-item"><kbd>N</kbd> <span>Next Video in Queue</span></div>
+          <div class="shortcut-item"><kbd>Shift</kbd> + <kbd>N</kbd> <span>Previous Video</span></div>
+          <div class="shortcut-item"><kbd>O</kbd> <span>Open File Picker</span></div>
+          <div class="shortcut-item"><kbd>U</kbd> <span>Paste Video Link</span></div>
+          <div class="shortcut-item"><kbd>?</kbd> <span>Show this Cheat Sheet</span></div>
+        </div>
+      </div>
+    </dialog>
+
+    <!-- Hidden Native File Inputs -->
+    <input type="file" id="videoFileInput" multiple accept="video/*,.mkv,.webm,.mp4,.mov,.avi" style="display: none;">
+    <input type="file" id="subtitleFileInput" accept=".vtt,.srt" style="display: none;">
+
+    <!-- Offscreen Canvas for Frame Snapshots -->
+    <canvas id="snapshotCanvas" style="display: none;"></canvas>
+
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

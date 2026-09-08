@@ -1,0 +1,13 @@
+{
+  "name": "browser-player",
+  "version": "1.0.0",
+  "description": "AuraPlayer - Modern Offline Video Player",
+  "main": "index.html",
+  "scripts": {
+    "start": "serve -l 3000",
+    "dev": "serve -l 3000"
+  },
+  "devDependencies": {
+    "serve": "^14.2.4"
+  }
+}
